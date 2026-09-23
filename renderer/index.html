@@ -305,6 +305,7 @@ button,input{font:inherit;color:inherit}
 .fist{display:flex;gap:4px}
 .fist button{min-width:36px;height:30px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);font-family:var(--font-mono);font-weight:600;cursor:pointer;color:var(--ink)}
 .fist button:hover{border-color:var(--accent)}
+.fist button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .dist{display:flex;align-items:flex-end;gap:3px;height:30px}
 .dist div{display:flex;flex-direction:column;align-items:center;gap:1px;font-family:var(--font-mono);font-size:10px;color:var(--ink-soft)}
 .dist i{display:block;width:14px;background:var(--accent);border-radius:2px 2px 0 0;min-height:2px}
@@ -425,6 +426,39 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   .results{top:auto;bottom:60px;max-height:50%}
 }
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+/* ---------- collaboration: who is here, where their pointer is, and whether we're connected ---------- */
+/* Peer colours are picked by the server so everyone agrees on who is which colour. */
+.peers{display:flex;align-items:center;gap:-4px}
+.peers .who{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;margin-left:-6px;border-radius:50%;
+  background:var(--c,#2F6FB0);color:#fff;font-size:11px;font-weight:700;border:2px solid var(--surface);cursor:default;letter-spacing:.2px}
+.peers .who:first-child{margin-left:0}
+.peers .who.lead{box-shadow:0 0 0 2px var(--accent)}
+.peers .who.more{background:var(--line-strong);color:var(--ink)}
+
+#cursors{position:absolute;inset:0;pointer-events:none;z-index:9000}
+#cursors .cur{position:absolute;transform:translate(-2px,-2px);will-change:transform,left,top;transition:left .08s linear,top .08s linear}
+@media (prefers-reduced-motion:reduce){#cursors .cur{transition:none}}
+#cursors .cur svg{display:block;width:18px;height:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+#cursors .cur span{position:absolute;left:14px;top:14px;white-space:nowrap;background:var(--c,#2F6FB0);color:#fff;
+  font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+/* A note somebody else is typing in: outlined in their colour so nobody fights over it. */
+.note.remote-edit{outline:2px solid var(--rc,#2F6FB0);outline-offset:1px}
+.note.remote-edit::after{content:attr(data-editor);position:absolute;left:0;top:-18px;background:var(--rc,#2F6FB0);color:#fff;
+  font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;white-space:nowrap}
+
+.netbar{background:var(--danger);color:#fff}
+.netbar .btn{background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.4)}
+.netbar.ok{background:var(--vote-bg);color:var(--ink)}
+
+.sharedim{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.32);display:grid;place-items:center;padding:16px}
+.sharebox{display:flex;flex-direction:column;gap:10px;min-width:280px;max-width:min(420px,calc(100vw - 32px));padding:14px;
+  background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--shadow)}
+.sharebox h2{margin:0;font-size:15px}
+.sharebox p{margin:0;font-size:13px;color:var(--ink-soft)}
+.sharebox .row{display:flex;gap:6px}
+.sharebox input{flex:1 1 auto;min-width:0;border:1px solid var(--line-strong);border-radius:5px;padding:6px 8px;
+  background:var(--ground);color:var(--ink);font-family:var(--font-mono);font-size:12px}
 </style>
 </head>
 <body>
@@ -442,6 +476,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       <span class="status" id="status" aria-live="polite"></span>
     </div>
     <div class="actions">
+      <div class="peers" id="peers" hidden role="group" aria-label="People on this board"></div>
       <span class="timerpill" id="timerPill" hidden></span>
       <div class="grp" role="group" aria-label="Facilitation">
         <button class="gb" id="btnTimer" type="button" aria-haspopup="menu" aria-expanded="false" title="Start a countdown">
@@ -459,6 +494,8 @@ body.presenting .note,body.presenting .ft{cursor:grab}
         <button class="gb icon" id="btnRedo" type="button" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
       </div>
+      <button class="gb" id="btnShare" type="button" hidden aria-haspopup="dialog" title="Work on this board together">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/></svg>Share</button>
       <button class="btn primary save" id="btnSave" type="button" title="Save project (⌘/Ctrl+S)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Save</button>
       <input id="fileInput" type="file" accept=".json,application/json" hidden>
@@ -486,6 +523,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       <div class="votebar" id="bsbar" hidden></div>
       <div class="votebar" id="csbar" hidden></div>
       <div class="votebar cmpbar" id="cmpbar" hidden></div>
+      <div class="votebar netbar" id="netbar" hidden></div>
       <div class="panes" id="panes">
       <div class="canvaswrap" id="wrap">
         <div id="world">
@@ -500,6 +538,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
           </svg>
           <div id="notes"></div>
           <div id="labels"></div>
+          <div id="cursors" aria-hidden="true"></div>
         </div>
         <div class="ui" id="ui"></div>
         <canvas class="minimap" id="minimap" width="180" height="120" aria-label="Minimap: click to move the view"></canvas>
@@ -641,6 +680,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
         color: COLORS.some(c => c.key === n.color) ? n.color : "yellow",
         text: String(n.text ?? ""), z: +n.z || 1,
         ...(n.hidden ? {hidden:true} : {}), ...(n.done ? {done:true} : {}),
+        ...(n.by ? {by:String(n.by)} : {}),   // who wrote it; set by the server, keeps face-down notes private
         ...(cleanConsensus(n.consensus) ? {consensus:cleanConsensus(n.consensus)} : {}),
       }));
       b.brainstorm = b.brainstorm && b.brainstorm.active ? {active:true, startedAt:String(b.brainstorm.startedAt || "")} : null;
@@ -659,14 +699,16 @@ body.presenting .note,body.presenting .ft{cursor:grab}
           status: v.status, type, startedAt: String(v.startedAt || ""),
           dotsPerVoter: clamp(Math.round(+v.dotsPerVoter) || 3, 1, 20),
           voters: v.voters.map(vo => {
+            // `by` ties a ballot to a person, so everyone can vote at once from their own device.
+            const who = vo?.by ? {by:String(vo.by)} : {};
             if (type === "thumbs") {
               const thumbs = {};
               Object.entries(vo?.thumbs || {}).forEach(([id, val]) => { if (ids.has(id) && (val === 1 || val === -1)) thumbs[id] = val; });
-              return {thumbs};
+              return {...who, thumbs};
             }
             const dots = {};
             Object.entries(vo?.dots || {}).forEach(([id, c]) => { c = Math.round(+c); if (ids.has(id) && c > 0) dots[id] = c; });
-            return {dots};
+            return {...who, dots};
           }),
         };
       } else b.vote = null;
@@ -683,7 +725,14 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   function cleanConsensus(c){
     if (!c || !Array.isArray(c.votes)) return null;
     const votes = c.votes.map(v => Math.round(+v)).filter(v => v >= 0 && v <= 5);
-    return votes.length ? {votes, at:String(c.at || "")} : null;
+    // A check that has just started has no numbers in it yet; dropping it would hide the fact
+    // that one is running from everybody else in the room.
+    if (!votes.length && !c.open) return null;
+    // `by[i]` says who held up `votes[i]`, so re-submitting replaces your own number instead of
+    // stacking another one up. Absent on files from before rooms, and on numbers typed in by hand.
+    const by = Array.isArray(c.by) ? c.by.slice(0, votes.length).map(v => String(v || "")) : null;
+    // `open` means the check is still running, so the tally stays hidden on everyone's screen.
+    return {votes, at:String(c.at || ""), ...(by ? {by} : {}), ...(c.open ? {open:true} : {}), ...(c.shown ? {shown:true} : {})};
   }
   function loadDraft(){
     if (desk) return null; // each desktop window is its own project; files are the record
@@ -701,6 +750,9 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   }
 
   // ---------- undo / redo ----------
+  // An entry is {snap, keys}: the whole document before the step, plus which entities that step
+  // touched. On your own, undo simply puts the document back. In a shared room only `keys` is put
+  // back, so undoing your own work leaves everything other people did in the meantime alone.
   let undoStack = [], redoStack = [], lastSnap = null, lastKey = null, lastTime = 0;
   const snapshot = () => JSON.stringify(state);
   function resetHistory(){ undoStack = []; redoStack = []; lastSnap = snapshot(); lastKey = null; updateUndo(); }
@@ -708,21 +760,33 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     const cur = snapshot();
     if (cur === lastSnap) return;
     const now = Date.now();
+    const keys = collabPush();          // null when working on your own
     if (!(key && key === lastKey && now - lastTime < 1200)) {
-      undoStack.push(lastSnap); if (undoStack.length > 150) undoStack.shift();
+      undoStack.push({snap:lastSnap, keys}); if (undoStack.length > 150) undoStack.shift();
+    } else if (keys && keys.length && undoStack.length) {
+      // Rapid edits coalesce into one undo step, so the keys they touched have to as well.
+      const top = undoStack[undoStack.length - 1];
+      if (top.keys) top.keys = [...new Set([...top.keys, ...keys])];
     }
     redoStack = []; lastSnap = cur; lastKey = key || null; lastTime = now;
     dirty = true; saveDraft(); renderStatus(); updateUndo();
   }
-  function restore(snap){
-    state = JSON.parse(snap); lastSnap = snap; lastKey = null;
+  function restore(entry){
+    if (room && entry.keys) {
+      const was = toEnts(JSON.parse(entry.snap)), now = toEnts(state);
+      entry.keys.forEach(k => { if (k in was) now[k] = was[k]; else delete now[k]; });
+      state = normalise(entsToState(now, state.activeBoard));
+    } else {
+      state = JSON.parse(entry.snap);
+    }
+    lastSnap = snapshot(); lastKey = null;
     editingId = null; selLink = null;
     const b = board(); const ids = new Set([...b.notes.map(n => n.id), ...b.frames.map(f => f.id)]);
     sel = new Set([...sel].filter(id => ids.has(id)));
-    dirty = true; saveDraft(); renderAll(); updateUndo();
+    dirty = true; saveDraft(); collabPush(); renderAll(); updateUndo();
   }
-  function undo(){ if (!undoStack.length) return; document.activeElement?.blur?.(); redoStack.push(lastSnap); restore(undoStack.pop()); }
-  function redo(){ if (!redoStack.length) return; document.activeElement?.blur?.(); undoStack.push(lastSnap); restore(redoStack.pop()); }
+  function undo(){ if (!undoStack.length) return; document.activeElement?.blur?.(); const e = undoStack.pop(); redoStack.push({snap:lastSnap, keys:e.keys}); restore(e); }
+  function redo(){ if (!redoStack.length) return; document.activeElement?.blur?.(); const e = redoStack.pop(); undoStack.push({snap:lastSnap, keys:e.keys}); restore(e); }
   function updateUndo(){ $("btnUndo").disabled = !undoStack.length; $("btnRedo").disabled = !redoStack.length; }
 
   const board = () => state.boards.find(b => b.id === state.activeBoard);
@@ -875,6 +939,17 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   // ================= rendering =================
   function renderStatus(){
     const s = $("status");
+    if (room) {
+      const n = room.peers.length;
+      s.textContent = netState === "live" ? `Shared · ${n} ${n === 1 ? "person" : "people"}` : netState === "connecting" ? "Connecting…" : "Offline";
+      s.title = netState === "live"
+        ? "Everyone with the link is editing this board. Save writes a copy to a file."
+        : "Your changes are kept here and sent when the board is back.";
+      s.classList.toggle("dirty", netState !== "live");
+      renderActions(); if (!bsSetup) renderBrainstormBar();
+      syncDesk();
+      return;
+    }
     s.textContent = dirty ? "Unsaved" : fileHandle ? `Saved · ${fileHandle.name}` : savedOnce ? "Saved" : "";
     s.title = dirty ? "You have changes that aren't in a project file yet" : "";
     renderActions(); if (!bsSetup) renderBrainstormBar();
@@ -1707,7 +1782,22 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   const vtype = v => (v && v.type) || "dots";
   const used = vo => Object.values(vo.dots || {}).reduce((a, b) => a + b, 0);
   const thumbsGiven = vo => Object.keys(vo.thumbs || {}).length;
-  const curVoter = () => vote().voters[vote().voters.length - 1];
+  // On one screen a vote is turn-based, so the last ballot in the list belongs to whoever has the
+  // laptop. In a room everyone votes at once from their own device, so your ballot is the one
+  // carrying your id — and curVoter() is null until you have actually cast something.
+  function curVoter(){
+    const v = vote();
+    if (!room || !room.me) return v.voters[v.voters.length - 1];
+    return v.voters.find(x => x.by === room.me.id) || null;
+  }
+  function myVoter(){
+    const v = vote();
+    if (!room || !room.me) return v.voters[v.voters.length - 1];
+    let mine = v.voters.find(x => x.by === room.me.id);
+    if (!mine) { mine = vtype(v) === "thumbs" ? {by:room.me.id, thumbs:{}} : {by:room.me.id, dots:{}}; v.voters.push(mine); }
+    return mine;
+  }
+  const votersIn = () => vote().voters.filter(vo => (vtype(vote()) === "thumbs" ? thumbsGiven(vo) : used(vo)) > 0).length;
   function tallies(b = board()){
     const v = b.vote, t = {}; if (!v) return t;
     const e = id => (t[id] ||= {dots:0, up:0, down:0, score:0});
@@ -1798,7 +1888,8 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       bar.insertAdjacentHTML("beforeend", `<span class="grow"></span>`);
       const start = () => {
         if (voteSetupType === "matrix") { voteSetup = false; renderVote(); createMatrixBoard(); return; }
-        const base = {status:"active", type:voteSetupType, startedAt:new Date().toISOString(), voters:[voteSetupType === "thumbs" ? {thumbs:{}} : {dots:{}}]};
+        const first = voteSetupType === "thumbs" ? {thumbs:{}} : {dots:{}};
+        const base = {status:"active", type:voteSetupType, startedAt:new Date().toISOString(), voters:inRoom() ? [] : [first]};
         if (voteSetupType === "dots") base.dotsPerVoter = clamp(Math.round(+inp.value) || 3, 1, 20);
         board().vote = base;
         voteSetup = false; showResults = false; sel.clear(); selLink = null;
@@ -1809,30 +1900,46 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       if (inp) setTimeout(() => { inp.focus(); inp.select(); });
     } else if (active) {
       bar.hidden = false;
-      const vo = curVoter();
+      const vo = curVoter(), shared = inRoom();
+      const label = shared ? "Your vote" : `Voter ${v.voters.length}`;
       if (type === "thumbs") {
-        const given = thumbsGiven(vo);
-        bar.insertAdjacentHTML("beforeend", `<span class="vt">Voter ${v.voters.length}</span>
+        const given = vo ? thumbsGiven(vo) : 0;
+        bar.insertAdjacentHTML("beforeend", `<span class="vt">${label}</span>
           <span class="vs" aria-live="polite">${given} thumb${given === 1 ? "" : "s"} given · click ▲ · right-click or long-press ▼ · click again to undo</span><span class="grow"></span>`);
       } else {
-        const left = v.dotsPerVoter - used(vo);
+        const left = v.dotsPerVoter - (vo ? used(vo) : 0);
         let budget = ""; for (let i = 0; i < v.dotsPerVoter; i++) budget += `<b class="${i >= left ? "spent" : ""}"></b>`;
-        bar.insertAdjacentHTML("beforeend", `<span class="vt">Voter ${v.voters.length}</span>
+        bar.insertAdjacentHTML("beforeend", `<span class="vt">${label}</span>
           <span class="budget" aria-hidden="true">${budget}</span>
           <span class="vs" aria-live="polite">${left} of ${v.dotsPerVoter} dots left</span><span class="grow"></span>`);
       }
-      const isEmpty = vo2 => type === "thumbs" ? thumbsGiven(vo2) === 0 : used(vo2) === 0;
-      bar.append(
-        vbtn("Next voter", "primary", () => {
-          if (isEmpty(curVoter())) { toast(type === "thumbs" ? "This voter hasn't given any thumbs yet." : "This voter hasn't placed any dots yet."); return; }
-          v.voters.push(type === "thumbs" ? {thumbs:{}} : {dots:{}}); changed(); renderDots(); renderVote(); toast(`Voter ${v.voters.length}'s turn`);
-        }),
-        vbtn("Finish voting", "", () => {
-          if (v.voters.length > 1 && isEmpty(curVoter())) v.voters.pop();
-          v.status = "closed"; showResults = true; changed(); renderDots(); renderVote();
-        }),
-        vbtn("Cancel vote", "", b => { if (!arm("cancel", b, "Discard all votes?")) return; board().vote = null; changed(); renderDots(); renderVote(); }),
-      );
+      const isEmpty = vo2 => !vo2 || (type === "thumbs" ? thumbsGiven(vo2) === 0 : used(vo2) === 0);
+      const close = () => { v.status = "closed"; showResults = true; changed(); renderDots(); renderVote(); };
+      if (shared) {
+        // Everyone votes at once, so the only thing worth showing is how many have finished.
+        const inYet = votersIn();
+        bar.insertAdjacentHTML("beforeend", `<span class="vs" aria-live="polite">${inYet} of ${room.peers.length} ${inYet === 1 ? "person has" : "people have"} voted</span><span class="grow"></span>`);
+        if (isFacilitator()) {
+          bar.append(
+            vbtn("Finish voting", "primary", close),
+            vbtn("Cancel vote", "", b => { if (!arm("cancel", b, "Discard all votes?")) return; board().vote = null; changed(); renderDots(); renderVote(); }),
+          );
+        } else {
+          bar.insertAdjacentHTML("beforeend", `<span class="vs">The facilitator closes the vote.</span>`);
+        }
+      } else {
+        bar.append(
+          vbtn("Next voter", "primary", () => {
+            if (isEmpty(curVoter())) { toast(type === "thumbs" ? "This voter hasn't given any thumbs yet." : "This voter hasn't placed any dots yet."); return; }
+            v.voters.push(type === "thumbs" ? {thumbs:{}} : {dots:{}}); changed(); renderDots(); renderVote(); toast(`Voter ${v.voters.length}'s turn`);
+          }),
+          vbtn("Finish voting", "", () => {
+            if (v.voters.length > 1 && isEmpty(curVoter())) v.voters.pop();
+            close();
+          }),
+          vbtn("Cancel vote", "", b => { if (!arm("cancel", b, "Discard all votes?")) return; board().vote = null; changed(); renderDots(); renderVote(); }),
+        );
+      }
     } else if (v?.status === "closed") {
       bar.hidden = false;
       const t = Object.values(tallies());
@@ -1873,19 +1980,19 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     p.appendChild(ol);
   }
   function castDot(n){
-    const v = vote(), vo = curVoter();
+    const v = vote(), vo = myVoter();
     if (used(vo) >= v.dotsPerVoter) { toast("No dots left. Press “Next voter” or “Finish voting”."); return; }
     vo.dots[n.id] = (vo.dots[n.id] || 0) + 1;
     changed(); renderDots(); renderVote();
   }
   function removeDot(n){
     const vo = curVoter();
-    if (!vo.dots[n.id]) { toast("This voter has no dots on that note."); return; }
+    if (!vo || !vo.dots[n.id]) { toast(inRoom() ? "You have no dots on that note." : "This voter has no dots on that note."); return; }
     if (--vo.dots[n.id] === 0) delete vo.dots[n.id];
     changed(); renderDots(); renderVote();
   }
   function castThumb(n, val){
-    const vo = curVoter(); vo.thumbs ||= {};
+    const vo = myVoter(); vo.thumbs ||= {};
     if (vo.thumbs[n.id] === val) delete vo.thumbs[n.id]; else vo.thumbs[n.id] = val;
     changed(); renderDots(); renderVote();
   }
@@ -1907,6 +2014,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
   }
   $("btnVote").addEventListener("click", () => {
+    if (!isFacilitator()) { toast("The facilitator starts and closes the vote."); return; }
     if (board().brainstorm?.active) { toast("Reveal the brainstorm before starting a vote."); return; }
     if (voting()) { toast("A vote is already running on this board."); return; }
     voteSetup = !voteSetup; renderVote();
@@ -2162,6 +2270,8 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   function setPresent(on){
     if (on && editingId) document.activeElement?.blur?.();
     presenting = on; closeFMenu(); closeMenu();
+    // Followers do not get dragged into full screen; they are just brought to the right board.
+    if (inRoom() && isFacilitator()) netSend({type:"present", on:!!on, board:state.activeBoard});
     sel.clear(); selLink = null; paintSel();
     document.body.classList.toggle("presenting", on);
     if (on) {
@@ -2316,6 +2426,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   }
   function freshUI(){ sel = new Set(); selLink = null; editingId = null; voteSetup = false; showResults = false; bsSetup = false; cmp.on = false; Object.keys(views).forEach(k => delete views[k]); }
   function applyLoaded(text, name){
+    if (inRoom()) leaveRoom("Left the shared board — the opened project is yours alone.");
     let d;
     try { d = JSON.parse(text); } catch(e) { toast(`${name} isn't valid JSON.`); return false; }
     if (!valid(d)) { toast(`${name} isn't a Sticky Board project file.`); return false; }
@@ -2347,6 +2458,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   });
 
   function newProject(){
+    if (inRoom()) leaveRoom("Left the shared board — a new project is yours alone.");
     const id = uid();
     state = normalise({project:"Untitled project", snap:true, legend:{}, activeBoard:id, boards:[{id, name:"Current", notes:[]}]});
     fileHandle = null; freshUI(); dirty = false; saveDraft(); resetHistory(); renderAll();
@@ -2787,6 +2899,16 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       }, {keep:true});
     });
     mItem(m, "Save", "⌘S", saveProject);
+    if (canCollab) {
+      mSep(m); mLabel(m, "Together");
+      if (inRoom()) {
+        mItem(m, "Board link…", "", startSharing);
+        mItem(m, "Leave shared board", "", () => leaveRoom("You've left the shared board. This copy is yours alone now."));
+      } else {
+        mItem(m, "Share board…", "", startSharing);
+        mItem(m, "Join board…", "", joinByLink);
+      }
+    }
     mSep(m); mLabel(m, "Export this board");
     mItem(m, "PNG image", "", exportPNG);
     mItem(m, "SVG image", "", exportSVG);
@@ -2962,6 +3084,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     toast("Brainstorm started. New notes stay face-down.");
   }
   function revealAll(){
+    if (!isFacilitator()) { toast("The facilitator reveals the brainstorm."); return; }
     const b = board(), ids = b.notes.filter(n => n.hidden).map(n => n.id);
     b.notes.forEach(n => delete n.hidden); b.brainstorm = null;
     changed(); renderBoard(); renderBrainstormBar(); renderPresentUI();
@@ -2970,6 +3093,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   }
   $("btnBrainstorm").addEventListener("click", () => {
     if (presenting) return;
+    if (!isFacilitator()) { toast("The facilitator starts and reveals the brainstorm."); return; }
     if (board().brainstorm?.active) { toast("A brainstorm is running on this board. Use “Reveal all” to end it."); return; }
     if (voting()) { toast("Finish the dot vote before starting a brainstorm."); return; }
     bsSetup = !bsSetup; renderBrainstormBar();
@@ -2980,7 +3104,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   const isDecision = n => parseTags(n.text).some(t => t.toLowerCase() === "#decision");
   const SIDE_TABS = [{key:"actions", name:"Actions"}, {key:"decisions", name:"Decisions"}, {key:"parking", name:"Parking lot"}];
   function consensusInfo(c){
-    if (!c || !c.votes?.length) return null;
+    if (!c || !c.votes?.length || c.open) return null;
     const avg = c.votes.reduce((a, v) => a + v, 0) / c.votes.length, min = Math.min(...c.votes);
     const verdict = min <= 1 ? {cls:"no", text:"Objections"} : avg >= 3 ? {cls:"ok", text:"Consensus"} : {cls:"mid", text:"Weak support"};
     return {avg, min, n:c.votes.length, verdict, label:`✋ ${avg.toFixed(1)}`};
@@ -3187,13 +3311,20 @@ body.presenting .note,body.presenting .ft{cursor:grab}
 
   // ================= consensus check (fist of five) =================
   // Turn-based and anonymous on one screen: each voter taps 0–5; the tally stays hidden until "Show result".
-  let cs = null; // {boardId, noteId, votes:[], done:false}
+  let cs = null; // on your own: {boardId, noteId, votes:[], done:false}
   const FIST = ["Block", "Serious concerns", "Concerns", "Neutral", "Support", "Full support"];
   function startConsensus(n){
+    if (!isFacilitator()) { toast("The facilitator runs the consensus check."); return; }
     if (voting()) { toast("Finish the vote before running a consensus check."); return; }
     if (n.hidden) { toast("Reveal the brainstorm first."); return; }
+    closeMenu();
+    if (inRoom()) {
+      n.consensus = {votes:[], at:new Date().toISOString(), by:[], open:true};
+      changed(); repaintNote(n.id); renderConsensusBar();
+      return;
+    }
     cs = {boardId:state.activeBoard, noteId:n.id, votes:[], done:false};
-    closeMenu(); renderConsensusBar();
+    renderConsensusBar();
   }
   function csNote(){ const b = state.boards.find(x => x.id === cs?.boardId); return b && b.notes.find(n => n.id === cs.noteId); }
   function csRecord(v){
@@ -3201,13 +3332,75 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     cs.votes.push(v); renderConsensusBar();
     toast(`Voter ${cs.votes.length} recorded. Next voter.`);
   }
+
+  // In a room the check lives on the note itself, so every screen finds it without being told and
+  // everyone holds up their own number. `open` means still collecting (tally hidden from everyone,
+  // so nobody is swayed by the numbers already in); `shown` means the result is up.
+  function openCheck(){
+    if (!inRoom()) return null;
+    for (const b of state.boards) for (const n of b.notes) if (n.consensus && (n.consensus.open || n.consensus.shown)) return n;
+    return null;
+  }
+  /** Replace your own number if you gave one already — a change of mind is not a second vote. */
+  function csShare(n, v){
+    const c = n.consensus; if (!c || !c.open || !room.me) return;
+    const i = (c.by || []).indexOf(room.me.id);
+    if (i >= 0) c.votes[i] = v;
+    else { c.votes.push(v); (c.by ||= []).push(room.me.id); }
+    changed(); renderConsensusBar();
+  }
   function renderConsensusBar(){
     const bar = $("csbar"); bar.innerHTML = "";
-    const n = cs && csNote();
-    if (!cs || !n) { cs = null; bar.hidden = true; return; }
+    const shared = openCheck();
+    const n = shared || (cs && csNote());
+    if (!n) { cs = null; bar.hidden = true; return; }
     bar.hidden = false;
     const q = document.createElement("span"); q.className = "vs cs-q"; q.textContent = `“${displayText(n.text).replace(/\s+/g, " ") || "Untitled note"}”`;
     bar.insertAdjacentHTML("beforeend", `<span class="vt">Consensus check</span>`); bar.appendChild(q);
+
+    if (shared) {
+      const c = n.consensus;
+      const lead = isFacilitator();
+      if (c.open) {
+        const mine = (c.by || []).indexOf(room.me ? room.me.id : "");
+        bar.insertAdjacentHTML("beforeend", `<span class="vs">${mine >= 0 ? `You held up ${c.votes[mine]} — tap another to change it` : "Hold up 0–5 fingers"}</span>`);
+        const fist = document.createElement("div"); fist.className = "fist"; fist.setAttribute("role","group"); fist.setAttribute("aria-label","Fingers");
+        FIST.forEach((label, v) => {
+          const b = document.createElement("button"); b.type = "button"; b.textContent = v; b.title = `${v} — ${label}`;
+          b.setAttribute("aria-label", `${v} fingers, ${label}`);
+          b.setAttribute("aria-pressed", String(mine >= 0 && c.votes[mine] === v));
+          b.addEventListener("click", () => csShare(n, v)); fist.appendChild(b);
+        });
+        bar.appendChild(fist);
+        const waiting = Math.max(0, room.peers.length - c.votes.length);
+        bar.insertAdjacentHTML("beforeend", `<span class="vs" aria-live="polite">${c.votes.length} in${waiting ? ` · waiting for ${waiting}` : ""}</span><span class="grow"></span>`);
+        if (lead) {
+          bar.append(
+            vbtn(`Show result${c.votes.length ? ` (${c.votes.length})` : ""}`, "primary", () => {
+              if (!c.votes.length) { toast("Nobody has held up a number yet."); return; }
+              delete c.open; c.shown = true; changed(); repaintNote(n.id); renderConsensusBar();
+            }),
+            vbtn("Cancel", "", () => { delete n.consensus; changed(); repaintNote(n.id); renderConsensusBar(); }),
+          );
+        } else bar.insertAdjacentHTML("beforeend", `<span class="vs">The facilitator shows the result.</span>`);
+        return;
+      }
+      // Result, on everyone's screen at once.
+      const ci = consensusInfo(c);
+      const counts = [0, 1, 2, 3, 4, 5].map(v => c.votes.filter(x => x === v).length), max = Math.max(1, ...counts);
+      const dist = document.createElement("div"); dist.className = "dist"; dist.setAttribute("aria-label", counts.map((x, v) => `${v}: ${x}`).join(", "));
+      counts.forEach((x, v) => { dist.insertAdjacentHTML("beforeend", `<div title="${v} fingers: ${x}"><i style="height:${Math.round(x / max * 20) + 2}px"></i>${v}</div>`); });
+      bar.appendChild(dist);
+      bar.insertAdjacentHTML("beforeend", `<span class="vs">avg ${ci.avg.toFixed(1)} · ${ci.n} voter${ci.n === 1 ? "" : "s"} · lowest ${ci.min}</span><span class="verdict ${ci.verdict.cls}">${ci.verdict.text}</span><span class="grow"></span>`);
+      if (lead) {
+        bar.append(
+          ...(isDecision(n) ? [] : [vbtn("Log as decision", "primary", () => { makeDecision(n); delete n.consensus.shown; changed(); renderConsensusBar(); })]),
+          vbtn("Run again", "", () => { n.consensus = {votes:[], at:new Date().toISOString(), by:[], open:true}; changed(); repaintNote(n.id); renderConsensusBar(); }),
+          vbtn("Done", isDecision(n) ? "primary" : "", () => { delete n.consensus.shown; changed(); repaintNote(n.id); renderConsensusBar(); }),
+        );
+      }
+      return;
+    }
     if (!cs.done) {
       bar.insertAdjacentHTML("beforeend", `<span class="vs">Voter ${cs.votes.length + 1} · tap 0–5 fingers (or press a key)</span>`);
       const fist = document.createElement("div"); fist.className = "fist"; fist.setAttribute("role","group"); fist.setAttribute("aria-label","Fingers");
@@ -3344,10 +3537,593 @@ body.presenting .note,body.presenting .ft{cursor:grab}
     });
   }
 
+  // ================= collaboration =================
+  // A room is one board shared live by everyone holding the link. The wire format is entities, not
+  // whole documents: each change works out which entities actually differ from what the server has
+  // confirmed and sends only those, so two people working on different notes never overwrite each
+  // other. server/entities.js does the same split on the other side — keep the two in step.
+  //
+  // Available when the page is served by the collaboration server (it stamps a marker into the
+  // build) or when the desktop app offers a room bridge. Everywhere else — a plain file, a
+  // claude.ai artifact — there is no server to talk to, so the sharing UI stays hidden.
+
+  const canCollab = !!document.querySelector('meta[name="sb-collab"]') || !!(desk && desk.room);
+
+  let room = null;        // {id, me:{id,name,colour}, role, peers:[], base:{}, seq}
+  let netState = "off";   // off | connecting | live | retry
+  let sock = null, retryTimer = null, retryDelay = 1000;
+  let roomOrigin = "";   // desktop only: the server this room lives on
+  const remoteEdits = new Map();   // noteId -> peer id, so nobody fights over the same note
+  const cursors = new Map();       // peer id -> {x, y, board, el, seen}
+
+  const inRoom = () => !!room;
+  // Solo, you run everything; that is what keeps the single-player app exactly as it was.
+  const isFacilitator = () => !room || room.role === "facilitator";
+  const peerById = id => (room ? room.peers.find(p => p.id === id) : null);
+  const NAME_KEY = "sticky-board-name";
+
+  // ---------- the entity split (mirror of server/entities.js) ----------
+  // Deep copies, not shallow ones. `room.base` is what "the server already has this" is measured
+  // against, so it must not share a single array or object with live state — otherwise casting a
+  // dot into vote.voters, or a number into note.consensus, changes both sides at once and the
+  // diff sees nothing to send. That bug is silent: the vote simply never reaches anyone.
+  const cloneEnt = v => JSON.parse(JSON.stringify(v));
+  function toEnts(st){
+    const out = {};
+    out.meta = cloneEnt({project:st.project, snap:!!st.snap, legend:st.legend, linkDefaults:st.linkDefaults});
+    st.boards.forEach((b, i) => {
+      out[`board:${b.id}`] = {id:b.id, name:b.name, order:i};
+      b.notes.forEach(n => { out[`note:${b.id}:${n.id}`] = cloneEnt(n); });
+      b.frames.forEach(f => { out[`frame:${b.id}:${f.id}`] = cloneEnt(f); });
+      b.links.forEach(l => { out[`link:${b.id}:${l.id}`] = cloneEnt(l); });
+      if (b.vote) out[`vote:${b.id}`] = cloneEnt(b.vote);
+      if (b.brainstorm) out[`brainstorm:${b.id}`] = cloneEnt(b.brainstorm);
+    });
+    (st.parking || []).forEach(p => { out[`park:${p.id}`] = cloneEnt(p); });
+    return out;
+  }
+  function parseK(key){
+    const p = String(key).split(":");
+    if (p[0] === "meta" && p.length === 1) return {type:"meta"};
+    if (["board","vote","brainstorm"].includes(p[0]) && p.length === 2 && p[1]) return {type:p[0], board:p[1], id:p[1]};
+    if (p[0] === "park" && p.length === 2 && p[1]) return {type:"park", id:p[1]};
+    if (["note","frame","link"].includes(p[0]) && p.length === 3 && p[1] && p[2]) return {type:p[0], board:p[1], id:p[2]};
+    return null;
+  }
+  // Deterministic, so two entities that mean the same thing compare equal whatever their key order.
+  function stableJSON(v){
+    if (v === null || typeof v !== "object") return JSON.stringify(v);
+    if (Array.isArray(v)) return "[" + v.map(stableJSON).join(",") + "]";
+    return "{" + Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + stableJSON(v[k])).join(",") + "}";
+  }
+  function diffEnts(prev, next){
+    const out = {};
+    for (const k of Object.keys(next)) if (!(k in prev) || stableJSON(prev[k]) !== stableJSON(next[k])) out[k] = next[k];
+    for (const k of Object.keys(prev)) if (!(k in next)) out[k] = null;
+    return out;
+  }
+  function entsToState(map, keepActive){
+    const boards = [], byId = new Map();
+    Object.keys(map).forEach(key => {
+      const k = parseK(key); if (!k || k.type !== "board") return;
+      const b = {id:k.id, name:map[key].name, order:+map[key].order || 0, notes:[], frames:[], links:[], vote:null, brainstorm:null};
+      boards.push(b); byId.set(k.id, b);
+    });
+    Object.keys(map).forEach(key => {
+      const k = parseK(key); if (!k) return;
+      const b = k.board ? byId.get(k.board) : null;
+      if (k.type === "note" && b) b.notes.push({...map[key]});
+      else if (k.type === "frame" && b) b.frames.push({...map[key]});
+      else if (k.type === "link" && b) b.links.push({...map[key]});
+      else if (k.type === "vote" && b) b.vote = {...map[key]};
+      else if (k.type === "brainstorm" && b) b.brainstorm = {...map[key]};
+    });
+    boards.sort((a, c) => a.order - c.order || (a.id < c.id ? -1 : 1));
+    boards.forEach(b => { delete b.order; b.notes.sort((x, y) => (x.z || 0) - (y.z || 0)); });
+    if (!boards.length) boards.push({id:uid(), name:"Current", notes:[], frames:[], links:[], vote:null, brainstorm:null});
+    const parking = [];
+    Object.keys(map).forEach(key => { const k = parseK(key); if (k && k.type === "park") parking.push({...map[key]}); });
+    const meta = map.meta || {};
+    return {
+      format:"sticky-board", version:2,
+      project:meta.project || "Untitled project", snap:!!meta.snap,
+      legend:{...(meta.legend || {})}, linkDefaults:{...(meta.linkDefaults || {})},
+      parking, boards,
+      activeBoard: boards.some(b => b.id === keepActive) ? keepActive : boards[0].id,
+    };
+  }
+
+  // ---------- sending ----------
+  function netSend(msg){
+    if (desk && desk.room) { desk.room.send(msg); return; }
+    if (sock && sock.readyState === 1) sock.send(JSON.stringify(msg));
+  }
+
+  /**
+   * Called from changed() after every mutation. Returns the entity keys this change touched, which
+   * undo needs so it can put back only your own work.
+   */
+  function collabPush(){
+    if (!room) return null;
+    const next = toEnts(state);
+    const patch = diffEnts(room.base, next);
+    const keys = Object.keys(patch);
+    if (!keys.length) return keys;
+    // Offline, the base stays where it is, so everything done meanwhile goes out on reconnect.
+    if (netState === "live") { room.base = next; netSend({type:"patch", entities:patch}); }
+    return keys;
+  }
+
+  // ---------- receiving ----------
+  function applyRemote(entities){
+    if (!room) return;
+    const hit = {tabs:false, meta:false, notes:new Set(), gone:new Set(), frames:false, links:false, vote:false, bs:false, park:false};
+    const cur = state.activeBoard;
+
+    Object.keys(entities).forEach(key => {
+      const val = entities[key], k = parseK(key);
+      if (!k) return;
+      if (val === null) delete room.base[key]; else room.base[key] = cloneEnt(val);
+
+      if (k.type === "meta") {
+        hit.meta = true;
+        if (val) {
+          state.project = String(val.project || "Untitled project");
+          state.snap = !!val.snap;
+          state.legend = {...val.legend};
+          state.linkDefaults = {...val.linkDefaults};
+        }
+        return;
+      }
+      if (k.type === "park") {
+        hit.park = true;
+        state.parking ||= [];
+        const i = state.parking.findIndex(p => p.id === k.id);
+        if (val === null) { if (i >= 0) state.parking.splice(i, 1); }
+        else if (i >= 0) state.parking[i] = {...val};
+        else state.parking.push({...val});
+        return;
+      }
+      if (k.type === "board") { hit.tabs = true; return; }
+
+      const b = state.boards.find(x => x.id === k.board);
+      if (!b) { hit.tabs = true; return; }
+      const onView = b.id === cur;
+
+      if (k.type === "note") {
+        const i = b.notes.findIndex(n => n.id === k.id);
+        if (val === null) { if (i >= 0) b.notes.splice(i, 1); if (onView) hit.gone.add(k.id); return; }
+        // Never yank text out from under someone mid-sentence; the editor keeps what it has.
+        const keepText = editingId === k.id && i >= 0 ? b.notes[i].text : null;
+        const n = {...val};
+        if (keepText !== null) n.text = keepText;
+        if (i >= 0) b.notes[i] = n; else b.notes.push(n);
+        if (onView) hit.notes.add(k.id);
+        return;
+      }
+      if (k.type === "frame") {
+        const i = b.frames.findIndex(f => f.id === k.id);
+        if (val === null) { if (i >= 0) b.frames.splice(i, 1); } else if (i >= 0) b.frames[i] = {...val}; else b.frames.push({...val});
+        if (onView) hit.frames = true;
+        return;
+      }
+      if (k.type === "link") {
+        const i = b.links.findIndex(l => l.id === k.id);
+        if (val === null) { if (i >= 0) b.links.splice(i, 1); } else if (i >= 0) b.links[i] = {...val}; else b.links.push({...val});
+        if (onView) hit.links = true;
+        return;
+      }
+      if (k.type === "vote") { b.vote = val === null ? null : {...val}; if (onView) hit.vote = true; return; }
+      if (k.type === "brainstorm") { b.brainstorm = val === null ? null : {...val}; if (onView) hit.bs = true; }
+    });
+
+    // A board appearing or disappearing is the one case worth rebuilding the document for.
+    if (hit.tabs) {
+      // Commit whatever is half-typed first — the rebuild would otherwise throw it away.
+      if (editingId) document.activeElement?.blur?.();
+      state = normalise(entsToState(room.base, cur));
+      sel = new Set(); selLink = null; editingId = null;
+      lastSnap = snapshot();
+      renderAll();
+      return;
+    }
+
+    hit.gone.forEach(id => noteNode(id)?.remove());
+    hit.notes.forEach(id => repaintNote(id));
+    if (hit.frames) { framesEl.innerHTML = ""; board().frames.forEach(f => framesEl.appendChild(frameEl(f))); }
+    if (hit.meta) { $("projectName").value = state.project; document.title = `${state.project || "Untitled"} · Sticky Board`; renderRail(); renderSnap(); }
+    // A vote change moves the dots on the notes as well as the bar.
+    if (hit.vote) { renderVote(); renderDots(); }
+    if (hit.bs) renderBrainstormBar();
+    if (hit.park) renderActions();
+    if (hit.notes.size || hit.gone.size || hit.links || hit.frames) { renderLinks(); renderDots(); applySearch(); updateCounts(); drawMinimap(); }
+    if (hit.notes.size || hit.gone.size) { renderToolbar(); renderTagChips(); renderActions(); renderConsensusBar(); }
+    // Remote work is not an undo step of yours, but it is now part of the document you would save.
+    lastSnap = snapshot();
+    dirty = true; saveDraft(); renderStatus();
+  }
+
+  /** Redraw one note in place, so the rest of the board (and anything being typed) is untouched. */
+  function repaintNote(id){
+    const n = noteById(id); if (!n) return;
+    let el = noteNode(id);
+    if (!el) { el = noteEl(n); notesEl.appendChild(el); fit(el); return; }
+    placeNote(el, n);
+    if (editingId !== id) {
+      const txt = el.querySelector(".txt");
+      const want = n.hidden ? "" : displayText(n.text);
+      if (txt.textContent !== want) txt.textContent = want;
+      paintChips(el, n);
+    }
+    paintNoteState(el, n);
+    el.classList.toggle("sel", sel.has(id));
+    fit(el);
+  }
+
+  // ---------- connection ----------
+  function setNet(s, message){
+    netState = s;
+    const bar = $("netbar");
+    if (s === "live" || s === "off") { bar.hidden = true; bar.innerHTML = ""; }
+    else {
+      bar.hidden = false; bar.innerHTML = "";
+      bar.className = "votebar netbar";
+      bar.insertAdjacentHTML("beforeend", `<span class="vt">${s === "connecting" ? "Connecting" : "Reconnecting"}</span><span class="vs">${message || "Your changes are kept and sent when the board is back."}</span><span class="grow"></span>`);
+      bar.append(vbtn("Work on my own", "", () => leaveRoom("You're working on your own copy now.")));
+    }
+    renderPeers();
+    renderStatus();
+  }
+
+  function wsURL(id){
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/ws?room=${encodeURIComponent(id)}`;
+  }
+
+  function connect(id, name){
+    room = room && room.id === id ? room : {id, me:null, role:"participant", peers:[], base:{}, seq: 0};
+    setNet(room.joined ? "retry" : "connecting");
+    if (desk && desk.room) { desk.room.connect({origin:roomOrigin, room:id, name, since:room.seq || 0}); return; }
+    try { sock = new WebSocket(wsURL(id)); }
+    catch { return scheduleRetry(); }
+    sock.addEventListener("open", () => netSend({type:"hello", name, since:room.seq || 0}));
+    sock.addEventListener("message", e => { let m; try { m = JSON.parse(e.data); } catch { return; } onServer(m); });
+    sock.addEventListener("close", () => { sock = null; if (room) scheduleRetry(); });
+    sock.addEventListener("error", () => { try { sock.close(); } catch {} });
+  }
+
+  function scheduleRetry(){
+    if (!room) return;
+    setNet("retry");
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => { if (room) connect(room.id, myName()); }, retryDelay);
+    retryDelay = Math.min(15000, Math.round(retryDelay * 1.8));
+  }
+
+  function onServer(m){
+    if (!m || !m.type) return;
+    switch (m.type) {
+      case "welcome": {
+        retryDelay = 1000;
+        room.me = m.you; room.role = m.role; room.peers = m.peers || []; room.seq = m.seq || 0;
+        if (m.full) {
+          // First join, or we were away too long to catch up: the room's copy is the truth. If we
+          // had been in this room before, anything done while disconnected is carried over rather
+          // than dropped — losing a workshop's notes to a flaky connection is not acceptable.
+          const pending = room.joined ? diffEnts(room.base, toEnts(state)) : null;
+          room.base = cloneEnt(m.entities);
+          state = normalise(entsToState(room.base, state && state.activeBoard));
+          freshUI(); dirty = false; resetHistory(); renderAll(); fitAll();
+          if (pending && Object.keys(pending).length) {
+            Object.keys(pending).forEach(k => { if (pending[k] === null) delete room.base[k]; else room.base[k] = pending[k]; });
+            state = normalise(entsToState(room.base, state.activeBoard));
+            netSend({type:"patch", entities:pending});
+            renderAll();
+            toast("Your board was rebuilt and the changes you made offline were added back.");
+          }
+        } else {
+          applyRemote(m.entities);
+          // Anything done while disconnected is still only ours; send it on.
+          const keys = collabPush();
+          if (keys && keys.length) toast(`Sent ${keys.length} change${keys.length === 1 ? "" : "s"} made while you were offline`);
+        }
+        room.joined = true;
+        setNet("live");
+        renderPeers(); renderVote(); renderBrainstormBar();
+        break;
+      }
+      case "patch":
+        room.seq = m.seq || room.seq;
+        applyRemote(m.entities || {});
+        if (m.from) markRemoteEdit(m.from, m.entities);
+        break;
+      case "ack":
+        room.seq = m.seq || room.seq;
+        break;
+      case "peers":
+        room.peers = m.peers || [];
+        if (room.me) { const me = peerById(room.me.id); if (me) room.role = me.facilitator ? "facilitator" : "participant"; }
+        // Who is here shows in the status line and changes who may run a vote, so redraw both.
+        renderPeers(); renderStatus(); renderVote(); renderBrainstormBar(); renderConsensusBar();
+        break;
+      case "cursor": moveCursor(m); break;
+      case "present": {
+        const who = peerById(m.by);
+        if (m.on && m.board && state.boards.some(b => b.id === m.board) && m.board !== state.activeBoard) switchBoard(m.board);
+        toast(m.on ? `${who ? who.name : "The facilitator"} is presenting` : "Presentation ended");
+        break;
+      }
+      case "error":
+        toast(m.message || "The board couldn't be joined.");
+        leaveRoom();
+        break;
+    }
+  }
+
+  const myName = () => { try { return localStorage.getItem(NAME_KEY) || ""; } catch { return ""; } };
+  const setMyName = n => { try { localStorage.setItem(NAME_KEY, n); } catch {} };
+
+  function leaveRoom(msg){
+    clearTimeout(retryTimer);
+    if (desk && desk.room) desk.room.close();
+    if (sock) { try { sock.close(); } catch {} sock = null; }
+    room = null; retryDelay = 1000;
+    cursors.forEach(c => c.el.remove()); cursors.clear();
+    remoteEdits.clear();
+    notesEl.querySelectorAll(".note.remote-edit").forEach(el => { el.classList.remove("remote-edit"); el.removeAttribute("data-editor"); });
+    if (canCollab && !desk) history.replaceState(null, "", "/");
+    setNet("off");
+    renderPeers(); renderVote(); renderBrainstormBar();
+    if (msg) toast(msg);
+  }
+
+  // ---------- presence ----------
+  function initials(name){
+    const parts = String(name).trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+  }
+  function renderPeers(){
+    const box = $("peers");
+    $("btnShare").hidden = !canCollab;
+    if (!room || !room.peers.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false; box.innerHTML = "";
+    const shown = room.peers.slice(0, 6);
+    shown.forEach(p => {
+      const el = document.createElement("span");
+      el.className = "who" + (p.facilitator ? " lead" : "");
+      el.style.setProperty("--c", p.colour);
+      el.textContent = initials(p.name);
+      const me = room.me && p.id === room.me.id;
+      el.title = `${p.name}${me ? " (you)" : ""}${p.facilitator ? " · runs this board" : ""}`;
+      box.appendChild(el);
+    });
+    if (room.peers.length > shown.length) {
+      const more = document.createElement("span");
+      more.className = "who more"; more.textContent = `+${room.peers.length - shown.length}`;
+      more.title = room.peers.slice(shown.length).map(p => p.name).join(", ");
+      box.appendChild(more);
+    }
+  }
+
+  // ---------- cursors ----------
+  let lastCursorAt = 0;
+  function sendCursor(e){
+    if (!room || netState !== "live") return;
+    const now = Date.now();
+    if (now - lastCursorAt < 50) return;       // 20 a second is plenty to look smooth
+    lastCursorAt = now;
+    const p = toWorld(e.clientX, e.clientY);
+    netSend({type:"cursor", x:Math.round(p.x), y:Math.round(p.y), board:state.activeBoard, sel:editingId || ""});
+  }
+  function moveCursor(m){
+    const peer = peerById(m.from);
+    if (!peer || (room.me && m.from === room.me.id)) return;
+    let c = cursors.get(m.from);
+    if (!c) {
+      const el = document.createElement("div");
+      el.className = "cur";
+      el.style.setProperty("--c", peer.colour);
+      el.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 1l5.5 14 2-6 6-2z" fill="${peer.colour}" stroke="#fff" stroke-width="1.2"/></svg><span></span>`;
+      el.querySelector("span").textContent = peer.name;
+      $("cursors").appendChild(el);
+      c = {el};
+      cursors.set(m.from, c);
+    }
+    c.seen = Date.now();
+    c.el.hidden = m.board !== state.activeBoard;
+    c.el.style.left = m.x + "px";
+    c.el.style.top = m.y + "px";
+    markEditing(m.from, m.sel);
+  }
+  /** Outline the note someone else is typing in, in their colour. */
+  function markEditing(peerId, noteId){
+    for (const [id, who] of remoteEdits) {
+      if (who === peerId && id !== noteId) { remoteEdits.delete(id); const el = noteNode(id); if (el) { el.classList.remove("remote-edit"); el.removeAttribute("data-editor"); } }
+    }
+    if (!noteId) return;
+    const peer = peerById(peerId), el = noteNode(noteId);
+    if (!peer || !el) return;
+    remoteEdits.set(noteId, peerId);
+    el.classList.add("remote-edit");
+    el.style.setProperty("--rc", peer.colour);
+    el.setAttribute("data-editor", peer.name);
+  }
+  function markRemoteEdit(peerId, entities){
+    // A patch on a note is a good moment to show who touched it, even without a cursor.
+    Object.keys(entities || {}).forEach(key => {
+      const k = parseK(key);
+      if (k && k.type === "note" && entities[key]) markEditing(peerId, k.id);
+    });
+  }
+  // Drop pointers that have stopped moving, so a cursor never sits abandoned on the board.
+  setInterval(() => {
+    const now = Date.now();
+    cursors.forEach((c, id) => { if (now - (c.seen || 0) > 12000) { c.el.remove(); cursors.delete(id); } });
+  }, 5000);
+
+  // ---------- sharing ----------
+  function card(build){
+    const back = document.createElement("div");
+    back.className = "sharedim";
+    const box = document.createElement("div");
+    box.className = "sharebox";
+    box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");
+    back.appendChild(box);
+    const close = () => back.remove();
+    back.addEventListener("pointerdown", e => { if (e.target === back) close(); });
+    back.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Escape") close(); });
+    build(box, close);
+    document.body.appendChild(back);
+    box.querySelector("input,button")?.focus();
+    return close;
+  }
+
+  const SERVER_KEY = "sticky-board-server";
+  function askServer(then){
+    let last = ""; try { last = localStorage.getItem(SERVER_KEY) || ""; } catch {}
+    card((box, close) => {
+      box.insertAdjacentHTML("beforeend", `<h2>Share from this app</h2><p>Where is your Sticky Board server? Everyone you invite needs to be able to reach it.</p>`);
+      const row = document.createElement("div"); row.className = "row";
+      const input = document.createElement("input");
+      input.type = "text"; input.placeholder = "https://board.example.com"; input.value = last;
+      input.setAttribute("aria-label", "Server address");
+      const err = document.createElement("p"); err.hidden = true;
+      const go = () => {
+        let origin = "";
+        try { const u = new URL(input.value.trim()); if (!/^https?:$/.test(u.protocol)) throw 0; origin = u.origin; }
+        catch { err.textContent = "That isn't a web address. It should start with http:// or https://."; err.hidden = false; input.focus(); return; }
+        try { localStorage.setItem(SERVER_KEY, origin); } catch {}
+        close(); then(origin);
+      };
+      input.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") go(); });
+      row.append(input, vbtn("Continue", "primary", go));
+      box.append(row, err);
+      setTimeout(() => { input.focus(); input.select(); });
+    });
+  }
+
+  function askName(then){
+    card((box, close) => {
+      box.insertAdjacentHTML("beforeend", `<h2>Join this board</h2><p>Your name shows on your cursor so people know who is moving what.</p>`);
+      const row = document.createElement("div"); row.className = "row";
+      const input = document.createElement("input");
+      input.type = "text"; input.maxLength = 40; input.placeholder = "Your name"; input.value = myName();
+      input.setAttribute("aria-label", "Your name");
+      const go = () => { const n = input.value.trim(); if (!n) { input.focus(); return; } setMyName(n); close(); then(n); };
+      input.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") go(); });
+      row.append(input, vbtn("Join", "primary", go));
+      box.appendChild(row);
+      setTimeout(() => { input.focus(); input.select(); });
+    });
+  }
+
+  function shareCard(){
+    // In the desktop app the page itself came from file://, so the link has to be built from the
+    // server the room actually lives on.
+    const url = `${roomOrigin || location.origin}/b/${room.id}`;
+    card((box, close) => {
+      box.insertAdjacentHTML("beforeend", `<h2>Share this board</h2><p>Anyone with this link can open the board and edit it with you. There is no password, so share it the way you would share the room.</p>`);
+      const row = document.createElement("div"); row.className = "row";
+      const input = document.createElement("input");
+      input.type = "text"; input.readOnly = true; input.value = url; input.setAttribute("aria-label", "Board link");
+      input.addEventListener("focus", () => input.select());
+      row.append(input, vbtn("Copy", "primary", async b => {
+        try { await navigator.clipboard.writeText(url); b.textContent = "Copied"; }
+        catch { input.select(); b.textContent = "Press ⌘/Ctrl+C"; }
+      }));
+      box.appendChild(row);
+      const foot = document.createElement("div"); foot.className = "row";
+      foot.append(vbtn("Leave board", "", () => { close(); leaveRoom("You've left the shared board. This copy is yours alone now."); }), vbtn("Done", "", close));
+      box.appendChild(foot);
+      setTimeout(() => { input.focus(); input.select(); });
+    });
+  }
+
+  async function startSharing(){
+    if (room) { shareCard(); return; }
+    const afterCreate = (origin, id, name) => {
+      roomOrigin = origin;
+      if (!desk) history.replaceState(null, "", `/b/${id}`);
+      connect(id, name);
+      // The card opens once we are actually in, so the link it shows is a link that works.
+      const wait = setInterval(() => { if (netState === "live") { clearInterval(wait); shareCard(); } }, 100);
+      setTimeout(() => clearInterval(wait), 8000);
+    };
+    if (desk && desk.room) { askServer(origin => askName(async name => {
+      const r = await desk.room.create({origin, state});
+      if (!r || !r.id) { toast(r && r.error ? r.error : "The board couldn't be shared. Check the server address."); return; }
+      afterCreate(origin, r.id, name);
+    })); return; }
+    const go = async name => {
+      try {
+        const r = await fetch("/api/rooms", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(state)});
+        if (!r.ok) { toast(await r.text() || "The board couldn't be shared."); return; }
+        const {id} = await r.json();
+        afterCreate(location.origin, id, name);
+      } catch { toast("The board couldn't be shared. Check your connection and try again."); }
+    };
+    myName() ? go(myName()) : askName(go);
+  }
+
+  if (canCollab) {
+    $("btnShare").addEventListener("click", startSharing);
+    wrap.addEventListener("pointermove", sendCursor);
+  }
+  if (desk && desk.room) {
+    desk.room.onMessage(onServer);
+    // The socket lives in the main process, so the page hears about it rather than watching it.
+    desk.room.onStatus(st => {
+      if (st === "open") netSend({type:"hello", name:myName(), since:room ? room.seq || 0 : 0});
+      else if (st === "closed" && room) scheduleRetry();
+    });
+  }
+
+  /** Pull a board link apart. Returns null when it is not one. */
+  function readLink(text){
+    const t = String(text || "").trim();
+    if (!t) return null;
+    try {
+      const u = new URL(t, location.origin);
+      const m = u.pathname.match(/^\/b\/([a-z2-7]{32})$/);
+      return m ? {origin:u.origin, id:m[1]} : null;
+    } catch { return null; }
+  }
+  function joinByLink(){
+    card((box, close) => {
+      box.insertAdjacentHTML("beforeend", `<h2>Join a board</h2><p>Paste the link somebody shared with you.</p>`);
+      const row = document.createElement("div"); row.className = "row";
+      const input = document.createElement("input");
+      input.type = "text"; input.placeholder = "https://…/b/…"; input.setAttribute("aria-label", "Board link");
+      const err = document.createElement("p"); err.hidden = true;
+      const go = () => {
+        const link = readLink(input.value);
+        if (!link) { err.textContent = "That isn't a board link. It should end in /b/ and a long code."; err.hidden = false; input.focus(); return; }
+        close();
+        // In a browser the link is just a page, so go there and let it join on load.
+        if (!desk) { location.href = `${link.origin}/b/${link.id}`; return; }
+        roomOrigin = link.origin;
+        askName(name => connect(link.id, name));
+      };
+      input.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") go(); });
+      row.append(input, vbtn("Join", "primary", go));
+      box.append(row, err);
+      setTimeout(() => input.focus());
+    });
+  }
+
+  /** A /b/<id> link means "join this board"; ask who you are, then hand the room's copy over. */
+  function bootCollab(){
+    if (!canCollab || desk) return;
+    const m = location.pathname.match(/^\/b\/([a-z2-7]{32})$/);
+    if (!m) { renderPeers(); return; }
+    askName(name => connect(m[1], name));
+  }
+
   // ================= desktop bridge =================
   function syncDesk(){
     if (!desk || !state) return;
-    desk.setState({dirty, project:state.project, snap:!!state.snap, groupMode, theme, presenting, compare:cmp.on, side:actionsOpen ? sideTab : ""});
+    desk.setState({dirty, project:state.project, snap:!!state.snap, groupMode, theme, presenting, compare:cmp.on, side:actionsOpen ? sideTab : "", shared:inRoom()});
   }
   function runCommand(cmd){
     const [c, arg] = String(cmd).split(":");
@@ -3360,6 +4136,9 @@ body.presenting .note,body.presenting .ft{cursor:grab}
       case "save": saveProject(); break;
       case "save-as": saveProject({saveAs:true}); break;
       case "save-then-close": saveProject().then(ok => desk.closeAfterSave(ok)); break;
+      case "share": startSharing(); break;
+      case "join": joinByLink(); break;
+      case "leave": inRoom() ? leaveRoom("You've left the shared board. This copy is yours alone now.") : toast("You're not on a shared board."); break;
       case "export-png": exportPNG(); break;
       case "export-svg": exportSVG(); break;
       case "export-md": exportMD(); break;
@@ -3417,6 +4196,7 @@ body.presenting .note,body.presenting .ft{cursor:grab}
   resetHistory();
   renderAll();
   requestAnimationFrame(fitAll);
+  bootCollab();
 })();
 </script>
 </body>

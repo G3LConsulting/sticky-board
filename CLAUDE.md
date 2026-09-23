@@ -1,6 +1,6 @@
 # Sticky Board — guide for Claude Code
 
-A sticky-note board for architecture sessions and workshops. One codebase runs as a **web page** (browser or claude.ai artifact) and as an **Electron desktop app** (macOS + Windows).
+A sticky-note board for architecture sessions and workshops. One codebase runs as a **web page** (browser or claude.ai artifact), as an **Electron desktop app** (macOS + Windows), and — served by the small Node server in `server/` — as a **live shared board** that a whole room edits at once.
 
 Owner: Angelo Dejaeghere (angelo@g3l.be). UI copy is British English.
 
@@ -11,13 +11,15 @@ Owner: Angelo Dejaeghere (angelo@g3l.be). UI copy is British English.
 ```bash
 npm install          # first time
 npm start            # sync renderer + run the desktop app
-npm run sync         # rebuild renderer/index.html from src/ only
+npm run serve        # sync + run the collaboration server on :8080
+npm test             # node --test: merge rules, the protocol, two pages syncing
+npm run sync         # rebuild both generated pages from src/ only
 npm run dist:mac     # .dmg + .zip, Apple Silicon + Intel (build on a Mac)
 npm run dist:win     # NSIS .exe, x64 + ARM (build on Windows, or a Mac with Wine)
 npm run dist         # both, needs a Mac with Wine
 ```
 
-Requires Node 20+. Electron 44, electron-builder 26. There is no `engines` field, no linter and no `npm test` — the only dev dependencies are electron and electron-builder.
+Requires Node 20+. Electron 44, electron-builder 26. There is no `engines` field and no linter. The only runtime dependencies are `@fontsource` (bundled fonts) and `ws`; dev dependencies are electron, electron-builder and jsdom.
 
 After every edit to `src/sticky-board.html`, run `npm run sync` before anything else: it is the one build step, and it throws if the `<div class="app">` marker it splits on has gone missing.
 
@@ -73,11 +75,17 @@ Releases are cut from `main` after the merge, never from a branch — see **Cutt
 ## Layout
 
 ```
-main.js                  Electron main: windows, native menu, dialogs, save/close prompts, IPC
+main.js                  Electron main: windows, native menu, dialogs, save/close prompts, IPC,
+                         and the WebSocket for shared boards (the page never opens one itself)
 preload.js               the ONLY bridge page ↔ system, exposed as window.stickyDesktop
 src/sticky-board.html    THE APP — single file: <title>, <style>, markup, one <script> IIFE
-scripts/sync-renderer.js builds renderer/index.html (adds CSP, swaps Google Fonts for @fontsource)
-renderer/index.html      GENERATED — never edit, but it IS checked in; regenerate and commit it with src changes
+scripts/sync-renderer.js builds BOTH generated pages (CSP, fonts, the collaboration marker)
+renderer/index.html      GENERATED for Electron — never edit, but it IS checked in; regenerate and
+                         commit it with src changes
+server/                  the collaboration server — see "Sharing a board"
+server/public/index.html GENERATED for the server — not checked in; `npm run serve` rebuilds it
+server/data/             live room documents — not checked in
+test/                    node --test suite (see Testing)
 build/icon.png           1024² icon; electron-builder derives .icns / .ico
 ```
 
@@ -87,13 +95,15 @@ build/icon.png           1024² icon; electron-builder derives .icns / .ico
 
 `sync-renderer.js` splits the fragment at the **first `<div class="app">`**: everything before it becomes `<head>`, everything from it on becomes `<body>`. So `<title>` and `<style>` must stay above that div, all markup below it, and the div's opening tag must keep that exact spelling. The script also strips the Google Fonts `<link>`s by URL — keep them on their own lines, pointing at `fonts.googleapis.com` / `fonts.gstatic.com`, or the CSP will block them in the desktop build.
 
-`.gitignore` covers `node_modules/` and `dist/`; `renderer/` is deliberately tracked.
+`.gitignore` covers `node_modules/`, `dist/`, `server/public/` and `server/data/`; `renderer/` is deliberately tracked, because the release workflow rejects a tag whose `renderer/index.html` does not match a fresh `npm run sync`. `server/public/` needs no such guarantee, so it is generated on the fly.
 
 ---
 
 ## How the page adapts to its host
 
 At the top of the script: `const desk = (window.stickyDesktop && window.stickyDesktop.isDesktop) ? window.stickyDesktop : null;` (and further down, `const inArtifact = typeof window.claude?.use === "function"`).
+
+A fourth host sits alongside these: the page served by `server/`, which is the same file plus a `<meta name="sb-collab">` marker. That marker is the only thing that switches the sharing UI on, so a plain file or an artifact — neither of which has a server to talk to — never shows a Share button it cannot honour.
 
 | Concern | Desktop (`desk`) | claude.ai artifact (`inArtifact`) | Plain browser |
 |---|---|---|---|
@@ -111,6 +121,8 @@ Page → main: `desk.setState({dirty, project, snap, groupMode, theme, presentin
 
 `sb:init` (sync: platform, sample), `sb:open`, `sb:opened`, `sb:save`, `sb:export`, `sb:confirm-discard`, `sb:state`, `sb:close-after-save`, `sb:command`, `sb:open-file`.
 
+Shared boards add `sb:room-create`, `sb:room-connect`, `sb:room-send`, `sb:room-close`, `sb:room-message`, `sb:room-status`. **The WebSocket lives in the main process, not the page.** That is deliberate: it means `renderer/index.html` keeps its strict `connect-src 'self'` whatever server somebody joins, and the preload still exposes named functions only.
+
 Rules: the page never receives file paths it can use directly. Main keeps `filePath` per window and only accepts a path it handed out itself (`pendingPath` + `sb:opened`). Writes are atomic (temp file + rename).
 
 ---
@@ -121,6 +133,79 @@ Rules: the page never receives file paths it can use directly. Main keeps `fileP
 - Navigation is blocked (`will-navigate`), `setWindowOpenHandler` denies new windows, and http(s) links go to the system browser.
 - A strict CSP is injected by `sync-renderer.js`: no remote scripts, styles or fonts. **Never add a CDN dependency.** Bundle it (see how `@fontsource` works).
 - The preload exposes named functions only. Never expose `ipcRenderer` itself.
+
+---
+
+## Sharing a board
+
+`npm run serve` starts one Node process that serves the page **and** the WebSocket on the same
+port, so the whole thing deploys as a single artefact — a VPS behind TLS, or the facilitator's
+laptop on the office wifi. `POST /api/rooms` creates a room from a document and returns its id;
+`GET /b/<id>` serves the app, which reads the id out of the URL and joins.
+
+**The link is the credential.** There are no accounts: anyone holding the link can edit. That is
+the point — sharing a board is as quick as pasting a URL into a meeting chat — and it is why room
+ids are 160 random bits and why nothing anywhere lists them.
+
+### How the merge works
+
+The wire format is **entities, not documents**. `server/entities.js` splits a board into
+independently addressable pieces, and the page keeps a copy of the same split (`toEnts` in the
+collaboration section — **change one and you must change the other**):
+
+```
+meta · board:<bid> · note:<bid>:<id> · frame:<bid>:<id> · link:<bid>:<id>
+park:<id> · vote:<bid> · brainstorm:<bid>
+```
+
+A client only ever sends entities that **actually differ** from what the server last confirmed
+(`diffEnts` against `room.base`), so nobody echoes a stale value back over someone else's newer
+one. With one server there is one arrival order, so the last patch to land wins per entity: two
+people dragging different notes both land; two people editing the same note's text is
+last-writer-wins, which is the accepted trade for a workshop tool rather than a document editor.
+
+`activeBoard` is **not** an entity — which board tab you are looking at is yours alone.
+
+Three things follow from this and are easy to break:
+
+- **`changed()` is still the one choke point.** It calls `collabPush()`, which computes the diff
+  and returns the entity keys the change touched. Every mutation must keep going through it.
+- **Undo restores keys, not documents.** An undo entry is `{snap, keys}`; in a room only `keys`
+  are put back, so undoing your own work leaves everything other people did untouched. A plain
+  whole-document restore would silently delete their notes.
+- **A note being edited ignores remote text.** `applyRemote` keeps the local text while
+  `editingId` matches, so nobody's typing gets yanked out from under them.
+
+### Face-down notes
+
+`hidden` notes must never leak, and over a network that becomes a **server** responsibility, not a
+rendering one. `redactFor` blanks the text of a hidden note for everyone except its author, so the
+words are never on the wire at all. Authorship (`note.by`) is stamped by the server from the
+connection that created the note, so a client cannot claim someone else's note to read it.
+
+### Roles
+
+The first person in a room is the facilitator and the server **rejects** `vote:*` and
+`brainstorm:*` patches from anyone else — the hidden button in the UI is a courtesy, not the
+control. If the facilitator leaves, the longest-connected peer is promoted so the room stays
+usable. Voting and the consensus check are per person: a ballot carries `by`, so everyone votes at
+once from their own device instead of passing a laptop.
+
+### Persistence and limits
+
+A room is written to `server/data/<id>.json` as an ordinary board document (open it in the app if
+you ever need to recover one by hand) — atomically, debounced, plus on last-peer-leave and on
+`SIGTERM`. Rooms load lazily and leave memory after 30 idle minutes. There are caps on message
+size, patch and cursor rate, peers per room, rooms per server (counting the ones on disk, not just
+the ones in memory) and new rooms per address per hour (`SB_ROOMS_PER_HOUR`, default 60), an origin
+check on the upgrade, and **every inbound entity is re-validated** in `server/validate.js` —
+including the document posted to `/api/rooms`.
+
+Two ordering traps worth knowing about, both fixed and both easy to reintroduce: the WebSocket
+message listener is attached **before** the room is read off disk (a `hello` arriving during the
+read would otherwise be dropped on the floor and the page would sit on "Connecting…" forever), and
+`Rooms.get` shares one in-flight load per room (two people opening a cold link at once would
+otherwise end up on two separate documents that overwrite each other's save file).
 
 ---
 
@@ -147,6 +232,12 @@ One project is one file. `normalise(s)` validates and fills defaults on load, an
   }]
 }
 ```
+
+Collaboration adds only optional fields, so the format stays version 2 and old files open
+unchanged: `note.by` (author), `voters[].by` (whose ballot), and on `consensus` a parallel `by[]`
+plus `open` / `shown` for a check that is still running or whose result is on screen. All of them
+go through `normalise()` and `server/validate.js`. **A room id is never saved to a file** — a file
+is a snapshot, the room is the live record.
 
 - **Tags live in note text:** `#tag`, `@owner`. `parseTags()` reads them and `displayText()` strips them for display. `#action` makes a note an action (`done` flag); `#decision` makes it a decision.
 - A note belongs to a frame when its **centre** is inside the frame (`inside(n, f)`). No explicit parent ids.
@@ -188,18 +279,32 @@ Most helpers are hoisted function declarations. Module state is `let`/`const`, s
 
 ## Testing
 
-There's no test suite in the repo yet. During development the checks were:
+`npm test` runs `node --test` over `test/`:
 
-1. **Renderer (jsdom):** load `src/sticky-board.html` into jsdom with stubs for `setPointerCapture`, `matchMedia`, canvas `getContext`/`measureText`, `innerText`, and `elementFromPoint`. Then drive the UI by clicking buttons and dispatching `pointerdown`/`pointerup`/`keydown`, and assert on the DOM and on `localStorage["sticky-board-draft-v1"]`. Clear any running timer interval with `process.exit` at the end.
-2. **Desktop bridge:** the same jsdom setup, plus a fake `window.stickyDesktop` recording calls. Check `runCommand` flows (open, save, save-as, exports, save-then-close).
-3. **Main process:** require `main.js` with `Module._load` patched to return a mock `electron` (BrowserWindow, dialog queue, ipcMain registry). Test save/open/export, "open same file focuses window", and the close prompt (Save / Don't Save / Cancel).
-4. **Packaging:** `npx electron-builder --linux dir`, then `npx @electron/asar list dist/linux-unpacked/resources/app.asar` to confirm `renderer/` and `@fontsource` files are included.
+- **`merge.test.js`** — the merge rules as pure functions: concurrent edits, tombstones, deltas,
+  redaction, authorship spoofing, sanitising. This is where a bug loses someone's work silently.
+- **`server.test.js`** — the protocol over a real socket: joining, roles, deltas, persistence.
+- **`page.test.js`** — boots both generated pages in jsdom. The app is one long IIFE, so the most
+  valuable assertion is simply that it still runs start to finish.
+- **`collab.test.js`** — two real pages against a real server: a note crossing between them, the
+  editing guard, undo isolation, and a face-down note never reaching the other device.
 
-A good first task is to turn 1–3 into `test/` with a `npm test` script (`node --test` + jsdom).
+jsdom needs stubs for `setPointerCapture`, `matchMedia`, canvas `getContext`/`measureText`,
+`innerText` and `elementFromPoint`; `boot()` in `page.test.js` has them. The runner is given
+`--test-force-exit`, because a listening server and open jsdom windows otherwise hold the loop.
 
-**Not yet verified on real hardware:** `npm start` on a Mac or PC has never been run. Check native menus, dialogs, the close prompt, the full-screen presentation and font loading first.
+Still not covered, and still worth doing:
 
----
+1. **Desktop bridge** — the same jsdom setup plus a fake `window.stickyDesktop` recording calls,
+   driving `runCommand` (open, save, save-as, exports, save-then-close) and the room relay.
+2. **Main process** — require `main.js` with `Module._load` patched to return a mock `electron`,
+   and test save/open/export, "open same file focuses window" and the close prompt.
+3. **Packaging** — `npx electron-builder --linux dir`, then `npx @electron/asar list` to confirm
+   `renderer/`, `@fontsource` and `ws` are all in the asar.
+
+**Not yet verified on real hardware:** the desktop app has never been run on a Mac or a PC. Check
+native menus, dialogs, the close prompt, full-screen presentation, font loading — and File ▸ Share
+board / Join board against a running server.
 
 ## Open items
 
@@ -207,7 +312,11 @@ A good first task is to turn 1–3 into `test/` with a `npm test` script (`node 
 - File association for `.board.json` (`build.fileAssociations` + `app.on("open-file")` on macOS + argv handling on Windows).
 - A recent projects menu (`app.addRecentDocument` is already called; there's no in-app menu yet).
 - Auto-update (electron-updater + a release feed). Deliberately left out for now: on macOS it only works on a signed and notarised build.
-- An automated test suite (see Testing).
+- Desktop, main-process and packaging tests (see Testing).
+- TLS and a real deployment for `server/` — it speaks plain HTTP and expects a reverse proxy in
+  front of it. Also no rate limit per IP on room creation, only a cap on rooms per server.
+- A room has no way to be ended or handed over deliberately; the facilitator role only moves when
+  somebody leaves.
 
 ---
 

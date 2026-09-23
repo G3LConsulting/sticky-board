@@ -10,17 +10,21 @@
   "scripts": {
     "sync": "node scripts/sync-renderer.js",
     "start": "npm run sync && electron .",
+    "serve": "npm run sync && node server/index.js",
+    "test": "node --test --test-force-exit \"test/*.test.js\"",
     "dist:mac": "npm run sync && electron-builder --mac",
     "dist:win": "npm run sync && electron-builder --win",
     "dist": "npm run sync && electron-builder --mac --win"
   },
   "dependencies": {
     "@fontsource/figtree": "^5.3.0",
-    "@fontsource/ibm-plex-mono": "^5.3.0"
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "electron": "^44.4.5",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "jsdom": "^29.1.1"
   },
   "build": {
     "appId": "be.g3l.stickyboard",
@@ -39,8 +43,20 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "identity": null,
       "hardenedRuntime": false
@@ -50,7 +66,13 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64", "arm64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "nsis": {

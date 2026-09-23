@@ -6,6 +6,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeTheme } = requir
 const path = require("node:path");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const WebSocket = require("ws");
 
 const isMac = process.platform === "darwin";
 const PROJECT_FILTER = [{ name: "Sticky Board project", extensions: ["json"] }];
@@ -73,6 +74,7 @@ function createWindow({ filePath = null } = {}) {
     snap: true, groupMode: false, theme: "system", compare: false, side: "",
     sample: windows.size === 0 && !filePath && isFirstRun(),
     pendingClose: false, forceClose: false,
+    roomSock: null,
   };
   windows.set(id, st);
   if (st.sample) markLaunched();
@@ -91,7 +93,7 @@ function createWindow({ filePath = null } = {}) {
   });
 
   win.on("close", e => onClose(e, st));
-  win.on("closed", () => { windows.delete(id); buildMenu(); });
+  win.on("closed", () => { closeRoom(st); windows.delete(id); buildMenu(); });
   win.on("focus", buildMenu);
 
   updateTitle(st);
@@ -219,6 +221,7 @@ ipcMain.on("sb:state", (e, s = {}) => {
   st.project = String(s.project || "Untitled project");
   st.snap = !!s.snap; st.groupMode = !!s.groupMode;
   st.compare = !!s.compare; st.side = ["actions", "decisions", "parking"].includes(s.side) ? s.side : "";
+  st.shared = !!s.shared;
   st.theme = THEMES.some(t => t.key === s.theme) ? s.theme : "system";
   updateTitle(st);
   if (BrowserWindow.getFocusedWindow() === st.win) buildMenu();
@@ -229,6 +232,84 @@ ipcMain.on("sb:close-after-save", (e, ok) => {
   if (ok && st.pendingClose) { st.forceClose = true; st.win.close(); }
   st.pendingClose = false;
 });
+
+// ---------- shared boards ----------
+// The page has no network access of its own — its Content-Security-Policy allows nothing remote —
+// so the connection to a board server is made here and relayed over IPC. That keeps the strict
+// policy in renderer/index.html intact no matter which server someone joins.
+
+/** Only ever talk to a plain http(s) origin the person typed in themselves. */
+function cleanOrigin(value) {
+  try {
+    const u = new URL(String(value));
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.origin;
+  } catch { return null; }
+}
+
+function closeRoom(st) {
+  if (!st || !st.roomSock) return;
+  const sock = st.roomSock;
+  st.roomSock = null;
+  try { sock.close(); } catch { /* already gone */ }
+}
+
+ipcMain.handle("sb:room-create", async (e, { origin, state } = {}) => {
+  const base = cleanOrigin(origin);
+  if (!base) return { error: "That isn't a web address. It should start with http:// or https://." };
+  try {
+    const r = await fetch(`${base}/api/rooms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return { error: (await r.text()) || "The board couldn't be shared." };
+    const { id } = await r.json();
+    return { id };
+  } catch {
+    return { error: "That server couldn't be reached. Check the address and your connection." };
+  }
+});
+
+ipcMain.on("sb:room-connect", (e, { origin, room, name, since } = {}) => {
+  const st = stateFor(e.sender); if (!st) return;
+  const base = cleanOrigin(origin);
+  if (!base || !/^[a-z2-7]{32}$/.test(String(room || ""))) {
+    st.win.webContents.send("sb:room-message", { type: "error", code: "bad-link", message: "That board link isn't valid." });
+    return;
+  }
+  closeRoom(st);
+  const url = `${base.replace(/^http/, "ws")}/ws?room=${encodeURIComponent(room)}`;
+  let sock;
+  try { sock = new WebSocket(url, { maxPayload: 1024 * 1024, handshakeTimeout: 15000 }); }
+  catch {
+    st.win.webContents.send("sb:room-status", "closed");
+    return;
+  }
+  st.roomSock = sock;
+  const alive = () => st.roomSock === sock && !st.win.isDestroyed();
+  sock.on("open", () => { if (alive()) st.win.webContents.send("sb:room-status", "open"); });
+  sock.on("message", raw => {
+    if (!alive()) return;
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    st.win.webContents.send("sb:room-message", msg);
+  });
+  sock.on("close", () => { if (alive()) { st.roomSock = null; st.win.webContents.send("sb:room-status", "closed"); } });
+  sock.on("error", () => { try { sock.close(); } catch { /* already gone */ } });
+  // The page asks for the roster itself once the socket is up; `name` and `since` ride along in
+  // its own hello, so nothing about the document is decided here.
+  void name; void since;
+});
+
+ipcMain.on("sb:room-send", (e, msg) => {
+  const st = stateFor(e.sender);
+  if (!st || !st.roomSock || st.roomSock.readyState !== WebSocket.OPEN) return;
+  try { st.roomSock.send(JSON.stringify(msg)); } catch { /* the close handler will retry */ }
+});
+
+ipcMain.on("sb:room-close", e => closeRoom(stateFor(e.sender)));
 
 // ---------- native menu ----------
 function send(cmd) {
@@ -270,6 +351,16 @@ function buildMenuNow() {
         { type: "separator" },
         { label: "Save", accelerator: "CmdOrCtrl+S", click: () => send("save") },
         { label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: () => send("save-as") },
+        { type: "separator" },
+        ...(st && st.shared
+          ? [
+              { label: "Board Link…", click: () => send("share") },
+              { label: "Leave Shared Board", click: () => send("leave") },
+            ]
+          : [
+              { label: "Share Board…", click: () => send("share") },
+              { label: "Join Board…", click: () => send("join") },
+            ]),
         { type: "separator" },
         {
           label: "Export",
