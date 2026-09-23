@@ -1,0 +1,63 @@
+{
+  "name": "sticky-board",
+  "productName": "Sticky Board",
+  "version": "1.0.0",
+  "description": "Sticky-note boards with frames, connectors, dot voting and exports.",
+  "author": "Angelo Dejaeghere <angelo@g3l.be>",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "sync": "node scripts/sync-renderer.js",
+    "start": "npm run sync && electron .",
+    "dist:mac": "npm run sync && electron-builder --mac",
+    "dist:win": "npm run sync && electron-builder --win",
+    "dist": "npm run sync && electron-builder --mac --win"
+  },
+  "dependencies": {
+    "@fontsource/figtree": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "be.g3l.stickyboard",
+    "productName": "Sticky Board",
+    "copyright": "© 2026 G3L Consulting",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "Sticky Board ${version}"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64", "arm64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Sticky Board"
+    }
+  }
+}
