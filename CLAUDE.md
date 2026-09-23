@@ -14,9 +14,25 @@ npm start            # sync renderer + run the desktop app
 npm run sync         # rebuild renderer/index.html from src/ only
 npm run dist:mac     # .dmg + .zip, Apple Silicon + Intel (build on a Mac)
 npm run dist:win     # NSIS .exe, x64 + ARM (build on Windows, or a Mac with Wine)
+npm run dist         # both, needs a Mac with Wine
 ```
 
-Requires Node 20+. Electron 44, electron-builder 26.
+Requires Node 20+. Electron 44, electron-builder 26. There is no `engines` field, no linter and no `npm test` — the only dev dependencies are electron and electron-builder.
+
+After every edit to `src/sticky-board.html`, run `npm run sync` before anything else: it is the one build step, and it throws if the `<div class="app">` marker it splits on has gone missing.
+
+### Cutting a release
+
+```bash
+npm version patch          # or minor / major — bumps package.json and tags vX.Y.Z
+git push --follow-tags     # pushes the commit and the tag
+```
+
+The tag starts `.github/workflows/release.yml`, which refuses the build unless the tag equals `v` + `package.json` version and `renderer/index.html` matches a fresh `npm run sync`. It then builds on `macos-latest` and `windows-latest` and uploads the installers to a **draft** release for you to check and publish by hand. Builds are unsigned (`CSC_IDENTITY_AUTO_DISCOVERY=false`), so nothing on the runner gets picked up as a certificate. `.github/release-notes-intro.md` is prepended to the auto-generated notes; it carries the first-launch instructions for unsigned builds.
+
+Re-running a build for a tag that already has a release uploads over the existing assets (`--clobber`) rather than creating a second release.
+
+`.claude/skills/release/SKILL.md` drives this end to end — preflight, bump, push, watch the run, report the draft URL — including how to recover when the verify job rejects a tag. Invoke it with `/release` rather than reassembling the git and gh commands by hand.
 
 ---
 
@@ -27,7 +43,7 @@ main.js                  Electron main: windows, native menu, dialogs, save/clos
 preload.js               the ONLY bridge page ↔ system, exposed as window.stickyDesktop
 src/sticky-board.html    THE APP — single file: <title>, <style>, markup, one <script> IIFE
 scripts/sync-renderer.js builds renderer/index.html (adds CSP, swaps Google Fonts for @fontsource)
-renderer/index.html      GENERATED — never edit, not committed
+renderer/index.html      GENERATED — never edit, but it IS checked in; regenerate and commit it with src changes
 build/icon.png           1024² icon; electron-builder derives .icns / .ico
 ```
 
@@ -35,11 +51,15 @@ build/icon.png           1024² icon; electron-builder derives .icns / .ico
 
 `src/sticky-board.html` is a body fragment. It has no `<!doctype>`, `<html>`, `<head>` or `<body>`, because the claude.ai artifact host adds its own wrapper. The sync script adds the wrapper for Electron. Keep it that way so the same file can still be published as an artifact.
 
+`sync-renderer.js` splits the fragment at the **first `<div class="app">`**: everything before it becomes `<head>`, everything from it on becomes `<body>`. So `<title>` and `<style>` must stay above that div, all markup below it, and the div's opening tag must keep that exact spelling. The script also strips the Google Fonts `<link>`s by URL — keep them on their own lines, pointing at `fonts.googleapis.com` / `fonts.gstatic.com`, or the CSP will block them in the desktop build.
+
+`.gitignore` covers `node_modules/` and `dist/`; `renderer/` is deliberately tracked.
+
 ---
 
 ## How the page adapts to its host
 
-At the top of the script: `const desk = window.stickyDesktop?.isDesktop ? window.stickyDesktop : null;`
+At the top of the script: `const desk = (window.stickyDesktop && window.stickyDesktop.isDesktop) ? window.stickyDesktop : null;` (and further down, `const inArtifact = typeof window.claude?.use === "function"`).
 
 | Concern | Desktop (`desk`) | claude.ai artifact (`inArtifact`) | Plain browser |
 |---|---|---|---|
@@ -102,7 +122,7 @@ One project is one file. `normalise(s)` validates and fills defaults on load, an
 
 ## Code map (inside the script IIFE in `src/sticky-board.html`)
 
-Sections are marked `// ================= name =================`. Roughly in order:
+Sections are marked `// ================= name =================` — `grep -n '// =\+ .* =\+' src/sticky-board.html` prints the whole map with line numbers, which is the fastest way around a 3,400-line file. Roughly in order:
 
 - **state:** `normalise`, `loadDraft`/`saveDraft`, **undo/redo** (`changed(key?)` snapshots the whole state; call it after every mutation, and pass a key to coalesce rapid edits).
 - **view:** zoom/pan (`view()`, `applyView()`, `toWorld()`, `fitAll()`, `fitBox()`), minimap.
@@ -149,10 +169,10 @@ A good first task is to turn 1–3 into `test/` with a `npm test` script (`node 
 
 ## Open items
 
-- Code signing and notarisation (macOS Developer ID + notarytool; Windows certificate). Builds are currently unsigned (`mac.identity: null`).
+- Code signing and notarisation (macOS Developer ID + notarytool; Windows certificate). Builds are currently unsigned (`mac.identity: null`), which the release workflow makes explicit rather than accidental. Adding it means repo secrets plus a few lines in the `build` job; the rest of the pipeline is unaffected.
 - File association for `.board.json` (`build.fileAssociations` + `app.on("open-file")` on macOS + argv handling on Windows).
 - A recent projects menu (`app.addRecentDocument` is already called; there's no in-app menu yet).
-- Auto-update (electron-updater + a release feed).
+- Auto-update (electron-updater + a release feed). Deliberately left out for now: on macOS it only works on a signed and notarised build.
 - An automated test suite (see Testing).
 
 ---

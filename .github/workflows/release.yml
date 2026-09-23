@@ -1,0 +1,134 @@
+# Release pipeline — builds the desktop app for macOS and Windows and uploads
+# the installers to a DRAFT GitHub release for review before publishing.
+#
+# To cut a release:
+#   npm version 1.0.1        # bumps package.json and creates the v1.0.1 tag
+#   git push --follow-tags   # pushes the commit and the tag
+#
+# The builds are unsigned, so first launch shows a warning on both systems
+# (see README.md). Wiring in signing later means adding secrets and a few
+# lines to the build jobs; nothing else here has to change.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to (re)build, e.g. v1.0.1"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # The renderer is generated from src/ but committed, and the tag must match
+  # package.json. Both are cheap to get wrong and expensive to find out later.
+  verify:
+    name: Verify tag and renderer
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Tag matches package.json version
+        id: check
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "v$pkg" ]; then
+            echo "::error::Tag $tag does not match package.json version $pkg. Bump the version, or tag v$pkg."
+            exit 1
+          fi
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+      - name: renderer/index.html is up to date with src/
+        run: |
+          npm run sync
+          if ! git diff --quiet -- renderer/index.html; then
+            echo "::error::renderer/index.html is stale. Run 'npm run sync' and commit the result."
+            git --no-pager diff --stat -- renderer/index.html
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+            script: dist:mac
+            artifacts: |
+              dist/*.dmg
+              dist/*.zip
+          - os: windows-latest
+            name: Windows
+            script: dist:win
+            artifacts: dist/*.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Build installers
+        run: npm run ${{ matrix.script }} -- --publish never
+        env:
+          # Builds are unsigned on purpose: stop electron-builder picking up
+          # any certificate that happens to be on the runner.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    name: Draft release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          ls -lh installers
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" installers/* --clobber
+          else
+            gh release create "$TAG" installers/* \
+              --draft \
+              --verify-tag \
+              --title "Sticky Board ${{ needs.verify.outputs.version }}" \
+              --generate-notes \
+              --notes "$(cat .github/release-notes-intro.md)"
+          fi
+          echo "Draft release ready: $(gh release view "$TAG" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"

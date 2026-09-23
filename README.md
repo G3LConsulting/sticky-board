@@ -53,8 +53,21 @@ app/
 - **Offline:** fonts (Figtree, IBM Plex Mono) are bundled via `@fontsource`, so nothing loads from the internet.
 - **Security:** context isolation and sandboxing are on, Node.js is off in the page, a strict Content-Security-Policy is applied, and the app never navigates away or opens pop-ups.
 
+## Releases
+
+Releases are built by GitHub Actions, not on your machine:
+
+```bash
+npm version patch          # bumps package.json and creates the tag
+git push --follow-tags
+```
+
+That builds the macOS and Windows installers on GitHub's runners and attaches them to a **draft** release. Open the release on GitHub, check the assets, edit the notes and press publish. The workflow fails early if the tag doesn't match `package.json` or if `renderer/index.html` is out of date with `src/`.
+
+To rebuild a tag without moving it, run the **Release** workflow manually from the Actions tab and give it the tag name; it replaces the assets on the existing release.
+
 ## Updating the app from the web version
 
 1. Copy the latest `sticky-board.html` over `src/sticky-board.html`.
 2. `npm start` to check it, then `npm run dist:mac` / `dist:win`.
-3. Bump `"version"` in `package.json` for each release.
+3. Release with `npm version` + `git push --follow-tags` (see above).
