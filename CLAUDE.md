@@ -36,6 +36,40 @@ Re-running a build for a tag that already has a release uploads over the existin
 
 ---
 
+## Git flow — required
+
+**Every change starts on a branch. `main` only ever receives finished, reviewed work.** Nothing is enforced by GitHub settings, so the discipline is the rule: don't commit to `main` directly, including for documentation and config.
+
+```bash
+git switch -c feature/parking-lot-filter    # feature/<slug>, or fix/<slug> for a bug
+# ... work, committing as you go ...
+```
+
+Commit freely on the branch — the messy history disappears at merge time.
+
+### Before a branch may be merged
+
+Both gates, every time:
+
+1. **Review.** Run `/code-review` over the branch diff against `main` and act on what it finds. There's no PR to hang comments off, so this is the only review the change gets.
+2. **Run the app.** `npm start`, then actually exercise the change — click it, undo it, save and reopen the file. The app has no test suite and has never been verified on real hardware, so a manual pass is the only thing standing between a regression and a release.
+
+Also confirm `renderer/index.html` was regenerated and committed if `src/` changed (`npm run sync`), or the release build will reject the tag later.
+
+### Merging
+
+```bash
+git switch main && git pull
+git merge --squash feature/parking-lot-filter
+git commit                                  # one clear message describing the feature
+git push
+git branch -d feature/parking-lot-filter
+```
+
+Squash, because GitHub builds release notes from the commits between two tags: one commit per feature makes the notes read like a changelog instead of a work diary. If a branch genuinely needs its individual commits preserved on `main`, use `git merge --no-ff` and say why.
+
+Releases are cut from `main` after the merge, never from a branch — see **Cutting a release**.
+
 ## Layout
 
 ```
