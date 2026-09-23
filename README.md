@@ -59,8 +59,8 @@ if it ever needs recovering by hand.
 
 | Command | Output (in `dist/`) | Build on |
 |---|---|---|
-| `npm run dist:mac` | `.dmg` and `.zip` for Apple Silicon and Intel | a Mac |
-| `npm run dist:win` | `.exe` installer for x64 and ARM | a Windows PC (a Mac also works if Wine is installed) |
+| `npm run dist:mac` | a `.dmg` for Apple Silicon and one for Intel | a Mac |
+| `npm run dist:win` | an `.exe` installer for x64 and one for ARM | a Windows PC (a Mac also works if Wine is installed) |
 | `npm run dist` | both | a Mac with Wine |
 
 ### First launch of an unsigned build

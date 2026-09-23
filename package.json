@@ -29,7 +29,7 @@
   "build": {
     "appId": "be.g3l.stickyboard",
     "productName": "Sticky Board",
-    "copyright": "© 2026 G3L Consulting",
+    "copyright": "\u00a9 2026 G3L Consulting",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -46,14 +46,12 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {
-          "target": "zip",
+          "target": "dmg",
           "arch": [
-            "arm64",
             "x64"
           ]
         }
@@ -69,7 +67,12 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
             "arm64"
           ]
         }

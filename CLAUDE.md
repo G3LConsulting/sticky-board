@@ -14,8 +14,8 @@ npm start            # sync renderer + run the desktop app
 npm run serve        # sync + run the collaboration server on :8080
 npm test             # node --test: merge rules, the protocol, two pages syncing
 npm run sync         # rebuild both generated pages from src/ only
-npm run dist:mac     # .dmg + .zip, Apple Silicon + Intel (build on a Mac)
-npm run dist:win     # NSIS .exe, x64 + ARM (build on Windows, or a Mac with Wine)
+npm run dist:mac     # one .dmg each for Apple Silicon and Intel (build on a Mac)
+npm run dist:win     # one NSIS .exe each for x64 and ARM (build on Windows, or a Mac with Wine)
 npm run dist         # both, needs a Mac with Wine
 ```
 

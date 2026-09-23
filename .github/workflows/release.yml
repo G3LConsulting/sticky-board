@@ -73,9 +73,7 @@ jobs:
           - os: macos-latest
             name: macOS
             script: dist:mac
-            artifacts: |
-              dist/*.dmg
-              dist/*.zip
+            artifacts: dist/*.dmg
           - os: windows-latest
             name: Windows
             script: dist:win
