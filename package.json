@@ -46,12 +46,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "dmg",
-          "arch": [
+            "arm64",
             "x64"
           ]
         }
@@ -67,12 +62,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "nsis",
-          "arch": [
+            "x64",
             "arm64"
           ]
         }
@@ -82,7 +72,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Sticky Board"
+      "shortcutName": "Sticky Board",
+      "buildUniversalInstaller": false
     }
   }
 }
